@@ -1,0 +1,53 @@
+[project]
+name = "richerevals"
+version = "0.1.0"
+description = "Richer evaluations pipeline (discovery + rare-event estimation)"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+
+dependencies = [
+  "transformers>=4.46.0",
+  "accelerate>=0.33.0",
+  "numpy>=1.26.0",
+  "pandas>=2.2.0",
+  "pyyaml>=6.0.1",
+  "tqdm>=4.66.0",
+  "matplotlib>=3.8.0",
+  "scikit-learn>=1.4.0",
+  "sentence-transformers>=2.7.0",
+  "safetensors>=0.4.3",
+  "tokenizers>=0.19.1",
+  "requests>=2.32.0",
+]
+
+[build-system]
+requires = ["setuptools>=69.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.1.1",
+  "isort>=5.13.2",
+  "flake8>=7.0.0",
+  "flake8-docstrings>=1.7.0",
+]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
+target-version = ["py313"]

@@ -1,0 +1,24 @@
+run:
+  name: "dev"
+  seed: 1337
+  deterministic: false
+
+model:
+  id: "meta-llama/Llama-3.2-1B-Instruct"
+  device: null  # "cuda", "mps", or "cpu"
+  dtype: "float16"
+
+sampling:
+  max_new_tokens: 128
+  temperature: 1.0
+  top_p: 1.0
+
+logging:
+  runs_dir: null
+
+promptbank:
+  path: "data/promptbank_v0.jsonl"
+
+prompting:
+  prompt_id: null
+  q_strategy: "auto"

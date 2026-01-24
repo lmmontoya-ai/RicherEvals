@@ -1,0 +1,16 @@
+run:
+  name: "q_screening"
+
+screening:
+  samples: 30
+  min_relative: 3.0
+  min_absolute: 0.01
+  min_count: 1
+  strategies:
+    - "echo"
+    - "minimal_rewrite"
+    - "auto"
+    - "aggressive"
+
+sampling:
+  batch_size: 4

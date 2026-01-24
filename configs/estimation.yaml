@@ -1,0 +1,16 @@
+run:
+  name: "estimation_dev"
+
+sampling:
+  max_new_tokens: 128
+  temperature: 1.0
+  top_p: 1.0
+  samples_per_alpha: 5
+  batch_size: 4
+
+prompting:
+  mode: "estimation"
+  alpha_values: [0.0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]
+  alpha0: 0.2
+  prompt_id: "pb0035"
+  q_strategy: "auto"

@@ -1,0 +1,18 @@
+run:
+  name: "discovery_batch"
+
+sampling:
+  max_new_tokens: 128
+  temperature: 1.2
+  top_p: 0.95
+
+prompting:
+  mode: "discovery"
+  gamma_values: [0.5, 1.0, 2.0]
+  q_strategy: "dominant_mode"
+
+batch:
+  prompt_limit: 10
+  samples_per_gamma: 5
+  tag_filter: "mode-collapse"
+  batch_size: 4

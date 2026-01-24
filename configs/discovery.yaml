@@ -1,0 +1,13 @@
+run:
+  name: "discovery_dev"
+
+sampling:
+  max_new_tokens: 128
+  temperature: 1.2
+  top_p: 0.95
+
+prompting:
+  mode: "discovery"
+  gamma_values: [0.5, 1.0, 2.0]
+  prompt_id: "pb0001"
+  q_strategy: "dominant_mode"

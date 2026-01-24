@@ -6,6 +6,8 @@ This plan targets **Richer Evaluations**, executing a **2.3 Unsupervised Answer 
 
 The core idea is to use paired decoding over two prompt contexts—an original prompt **P** and a modified prompt **Q**—and combine their next-token logits to either **bias away from** a dominant mode (discovery) or **tilt toward** a rare mode (estimation), while preserving a rigorous evaluation story (plots, ablations, calibration, and reproducibility).
 
+**Scope (initial):** This plan focuses only on **2.3 + 2.1**. Model-comparison amplification (2.2) and multi-turn simulation (2.4) are out of scope for the initial phase.
+
 
 ---
 
@@ -25,9 +27,6 @@ Can we estimate **p(Z | P)** (probability of undesired mode Z under original pro
 **RQ4 — Robustness / design sensitivity**
 How sensitive are discovery and probability estimates to the choice of Q, hyperparameters (α, γ), decoding constraints, and model family? The scope is targeted ablations around key levers, not exhaustive sweeps.
 
-**RQ5 (stretch) — Comparison across models**
-Can the same machinery differentiate two closely related models on Z (e.g., base vs instruct, or pre- vs post-training checkpoint) when naive sampling sees zero Z in 100 rollouts? This is only attempted after RQ1–RQ3 show success.
-
 
 ## 1.2 Hypotheses (Falsifiable Predictions)
 
@@ -39,7 +38,6 @@ Can the same machinery differentiate two closely related models on Z (e.g., base
 
 **H4 (RQ4):** “Closer” Q variants (minimal semantic edits that moderately increase Z) produce lower-variance importance weights and higher ESS than extreme Q variants that drastically shift intent/style.
 
-**H5 (RQ5):** A model pair with a real but small difference in Z propensity can be distinguished with fewer samples using the amplification/estimation pipeline than naive sampling.
 
 
 ## 1.3 Literature Synthesis (State of the Art, Gaps, and Leverage)
@@ -67,6 +65,14 @@ Let **P** be the original prompt (chat-formatted) and **Q** be a modified prompt
 
 We then sample from a combined logit distribution and append the sampled token to both streams so they remain synchronized. This makes it possible to define both discovery and estimation samplers in a clean, reproducible loop.
 
+### Q-screening protocol (shared across RQ1–RQ3)
+For each prompt P and target mode (dominant mode X or undesired mode Z), we will:
+1) Propose 3–4 candidate Q variants: **dialogue echo**, **minimal rewrite**, **explicit steer**, and **aggressive rewrite**.
+2) Run a small screening batch (e.g., 50–100 samples) to estimate ΔX or ΔZ. If the base rate is extremely low (<0.1%), adapt by increasing batch size until at least a small positive count is observed (or mark the prompt as non-viable for hero analyses).
+3) Select the **minimal-shift** Q that meets a pre-registered threshold (e.g., ≥3× relative increase or ≥+1% absolute increase in X/Z rate).
+4) Log the chosen Q and screening metrics; keep a held-out prompt set untouched for confirmation.
+If no Q meets the threshold, the prompt is excluded from hero analyses and retained only for exploratory discovery.
+
 
 ## 2.2 Sampling Rules
 
@@ -82,6 +88,13 @@ L_{\gamma}^{(t)} = L_P^{(t)} + \gamma\big(L_P^{(t)} - L_Q^{(t)}\big), \quad \gam
 \]
 This is used for discovery: if Q is built to increase the dominant mode X, then extrapolation pushes generation away from X and encourages alternative modes.
 
+### (C) Proposal correctness and truncation policy (estimation-critical)
+Importance sampling requires exact knowledge of the proposal distribution q. Therefore, **IS runs must either**:
+1) disable top‑k/top‑p truncation and sample from the full softmax, **or**
+2) incorporate truncation into q by explicitly renormalizing over the truncated support at each step.
+Any coherence filters or rejection sampling used for discovery must **not** be used in estimation unless the target is explicitly redefined as p(Z | P, coherent).
+**Decision:** For estimation runs (RQ3), we will **disable top‑k/top‑p** and sample from the full softmax to avoid truncation bias.
+
 
 ## 2.3 Experiments by Research Question
 
@@ -89,10 +102,12 @@ This is used for discovery: if Q is built to increase the dominant mode X, then 
 
 **Experiment 1: Mode-collapse benchmarks + diversity lift**
 **Objective and contribution:** Demonstrate that prompt-diff extrapolation reliably discovers multiple semantically distinct modes where naive sampling is collapsed, and quantify the gain over standard diversity techniques.
-**Methodology and technical approach:** Build a PromptBank of 30–50 prompts prone to mode collapse. For each prompt P, sample baseline outputs, identify the dominant mode X (via clustering and/or rule-based bucketing), construct Q_X that increases X (either via dialogue echo or minimal rewrite), then sample using logit extrapolation for γ ∈ {0.5, 1, 2, 4}. Cluster outputs and compute diversity metrics.
+**Methodology and technical approach:** Build a PromptBank of 30–50 prompts prone to mode collapse. For each prompt P, sample baseline outputs, identify the dominant mode X (via clustering and/or rule-based bucketing), **screen multiple candidate Q_X variants** and select the **minimal-shift Q** that measurably increases X on a small screening set (pre-registered criteria). Then sample using logit extrapolation for γ ∈ {0.5, 1, 2, 4}. Cluster outputs and compute diversity metrics with pre-registered clustering settings; include a small human audit to validate cluster distinctness.
+**Mode-collapse criterion (pre-registered):** A prompt qualifies as mode-collapsed if the dominant cluster exceeds a fixed threshold (e.g., ≥80% of baseline samples) or if output entropy is below a preset cutoff.
 **Datasets:** PromptBank‑v0 (30–50 prompts), authored in-repo. Minimal preprocessing: chat-template formatting per model and fixed generation caps.
 **Baselines:** Temperature/top‑p sweeps, and optionally a contrastive decoding baseline for logit-space shaping.
 **Success metrics:** Number of semantic clusters above a minimum size, mean embedding distance, self-BLEU, judge-based coherence score, plus curated exemplars per cluster.
+**Compute parity:** Normalize comparisons by total forward-pass budget (or total generated tokens), since paired decoding is ~2× forward passes.
 
 
 ### RQ2 — Rare-mode surfacing
@@ -103,37 +118,39 @@ This is used for discovery: if Q is built to increase the dominant mode X, then 
 **Datasets:** Subset of PromptBank‑v0 (3–5 prompts).
 **Baselines:** Best tuned temperature/top‑p from Experiment 1, plus optional judge-based rejection sampling as a costly baseline.
 **Success metrics:** Median samples-to-first-Z (bootstrap CI), Z rate per 1,000 samples, and false detection rate (manual audit + judge agreement).
+**Analysis upgrade:** Use time-to-event (survival) analysis with censoring; report hazard ratio or median with CI rather than only raw samples-to-first-Z.
+**Compute parity:** Normalize comparisons by forward-pass budget (or total generated tokens).
 
 
 ### RQ3 — Probability estimation
 
 **Experiment 3A: Interpolation curve (diagnostic visualization)**
 **Objective and contribution:** Produce “Z rate vs α” curves as an implementation and behavior sanity check.
-**Methodology:** Construct Q_Z that increases Z likelihood. For α ∈ {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}, sample N rollouts from L_α and measure Z rate. Fit a simple curve for visualization (not as the final estimator).
+**Methodology:** Construct Q_Z that increases Z likelihood via the Q-screening procedure (minimal-shift Q with verified Z increase). For α ∈ {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}, sample N rollouts from L_α and measure Z rate. Fit a simple curve for visualization (not as the final estimator).
 **Success metrics:** Smooth, replicable trends across at least 1–2 hero prompts and at least two models.
 
 **Experiment 3B: Importance sampling estimator of p(Z|P) (core)**
 **Objective and contribution:** Provide a principled estimate of p(Z|P) with uncertainty and diagnostics (ESS, weight distribution), and compare error against naive sampling at equal compute.
-**Methodology and technical approach:** Choose α0 that materially increases Z (e.g., α0=0.2). Sample sequences y_i ∼ q_{α0}. Compute log p_P(y_i) and log q_{α0}(y_i) token-by-token. Use importance weights w_i = exp(log p_P − log q_{α0}) and estimate p(Z|P) via weighted indicator averages. Compute ESS and confidence intervals (bootstrap; optionally stabilized weights). If weights degenerate, use mixture proposals across multiple α values, and/or weight clipping with explicit sensitivity reporting.
+**Methodology and technical approach:** Choose α0 that materially increases Z (e.g., α0=0.2) via Q-screening. Sample sequences y_i ∼ q_{α0} with **proposal-correct sampling** (no truncation, or truncation explicitly renormalized). Compute log p_P(y_i) and log q_{α0}(y_i) token-by-token. Use importance weights w_i = exp(log p_P − log q_{α0}) and estimate p(Z|P) via weighted indicator averages. Compute ESS, confidence intervals (bootstrap), and **PSIS k diagnostics**. If weights degenerate, use mixture proposals across multiple α values, and/or weight clipping with explicit sensitivity reporting. Report both unconditional p(Z|P) and conditional p(Z|P, coherent) if coherence filters are used elsewhere.
 **Baselines:** Naive sampling estimate and extrapolation-based estimate from α<1 curve fits.
-**Success metrics:** Lower error than naive sampling at equal compute, non-degenerate ESS, stable CIs, and calibration plots against brute-force ground truth for at least one prompt/model.
+**Naive baseline (estimation):** Sample directly from P with full-softmax decoding (no truncation) to match the target distribution.
+**Success metrics:** Lower error than naive sampling at equal compute, non-degenerate ESS and acceptable k, stable CIs, and calibration plots against brute-force ground truth for at least one prompt/model.
+**Compute parity:** Normalize comparisons by forward-pass budget (or total generated tokens).
 
 
 ### RQ4 — Robustness / sensitivity
 
 **Experiment 4: Q design + hyperparameter ablations**
 **Objective and contribution:** Identify stable operating regimes and best practices for constructing Q and tuning α/γ.
-**Methodology:** For 1–2 hero prompts, compare multiple Q variants (dialogue echo, minimal rewrite, aggressive rewrite), sweep α0 and γ, and optionally decoding constraints. Track Z hit rate, coherence, ESS, and estimator variance.
+**Methodology:** For 1–2 hero prompts, compare multiple Q variants (dialogue echo, minimal rewrite, aggressive rewrite) selected via the Q-screening criteria. Sweep α0 and γ, and optionally decoding constraints. Track Z hit rate, coherence, ESS/k diagnostics, and estimator variance. Report sensitivity to detector noise by auditing FP/FN rates and reflecting them in uncertainty bands.
 **Success metrics:** A recommended configuration with evidence of stability and an explicit tradeoff narrative.
 
 
-### RQ5 (stretch) — Comparison across models
-
-**Experiment 5: Model comparison on Z under low base rates**
-**Objective and contribution:** Demonstrate that the pipeline can distinguish two related models’ propensity for Z when naive sampling sees zero events.
-**Methodology:** Choose a model pair within the same tokenizer family; apply the discovery+estimation pipeline to compare p(Z|P).
-**Success metrics:** Directional difference detected with fewer samples and at least one compelling case study.
-
+### RQ0 (sanity check) — Toy-model validation
+**Experiment 0: Exact p(Z|P) on a toy model**
+**Objective and contribution:** Validate the end-to-end IS pipeline where ground truth is exactly computable.
+**Methodology:** Use a tiny model or finite-state generator where exact p(Z|P) can be computed by enumeration. Run the same discovery and IS estimation pipeline and compare against ground truth.
+**Success metrics:** IS estimator matches exact p(Z|P) within error bars; diagnostics behave as expected.
 
 ## 2.4 Model Selection
 
@@ -141,9 +158,11 @@ The model set is designed to maximize rapid iteration early, then demonstrate ge
 
 **Development / debugging:** Llama 3.2 1B Instruct. This enables rapid paired-decoding debugging, calibration runs, and brute-force estimation at moderate budgets.
 
-**Main experimental targets:** Qwen3 4B or 8B (Instruct/Thinking, depending on availability) and OLMo 3 7B Instruct/Think. These provide open-weight, research-friendly targets with strong tooling ecosystems, supporting broader credibility and replication without prohibitive compute.
+**Main experimental targets:** Gemma3‑4B, Qwen3‑4B Thinking, and (if feasible) Llama 3.2‑1B as a small-model anchor for calibration. These provide open‑weight, research‑friendly targets with strong tooling ecosystems, supporting broader credibility and replication without prohibitive compute.
 
 The minimum requirement is two models (one small, one mid-size) to show the method is not model-specific.
+
+**Hardware support requirement:** The inference stack must support **both NVIDIA GPUs (CUDA)** and **Apple Silicon (MPS/Metal)**. The paired-decoding implementation should keep a backend abstraction so the same sampler code runs on both platforms (e.g., HF + CUDA, and HF + MPS/MLX/llama.cpp as feasible).
 
 
 ---
@@ -162,10 +181,14 @@ The minimum requirement is two models (one small, one mid-size) to show the meth
 
 **Compute constraints:** If mid-size models are costly, development and calibration run on small models, and only the best hero prompts run on larger models with quantization and batching.
 
+**Truncation bias / target mismatch:** top‑k/top‑p truncation or coherence gating can change q or the target event. Mitigations include proposal-correct sampling, explicit renormalization, and reporting both unconditional and conditional estimates.
+
+**Backend divergence:** CUDA vs Apple Silicon backends can differ in numerics or performance. Mitigations include deterministic seed tests on short sequences, cross-backend logprob checks for α endpoints, and platform-specific performance notes.
+
 
 ## 3.2 Dependencies
 
-Core dependencies include PyTorch and Hugging Face Transformers (or equivalent inference stack), plus standard analysis tooling (numpy/pandas/matplotlib). Optional acceleration can be gained with vLLM/SGLang for batching. Embedding-based clustering uses sentence-transformers or equivalent, and judging can be done with a local judge model or an API judge if available.
+Core dependencies include PyTorch and Hugging Face Transformers (or equivalent inference stack), plus standard analysis tooling (numpy/pandas/matplotlib). Optional acceleration can be gained with vLLM/SGLang for batching on NVIDIA GPUs; Apple‑silicon support can use HF MPS and/or MLX/llama.cpp for local runs. Embedding-based clustering uses sentence-transformers or equivalent, and judging can be done with a local judge model or an API judge if available.
 
 
 ---
@@ -178,7 +201,9 @@ Core dependencies include PyTorch and Hugging Face Transformers (or equivalent i
 
 **Target (competitive):** Full pipeline from discovery to prevalence estimation: identify a rare undesired behavior Z, generate interpolation curves, implement importance sampling estimator with ESS and confidence intervals, and calibrate against brute-force ground truth on at least one prompt/model. Replicate on at least two models.
 
-**Stretch:** Robustness ablations across Q and hyperparameters, plus an optional model comparison experiment demonstrating sensitivity beyond naive sampling, and optional integration into automated auditing harnesses.
+**Stretch:** Robustness ablations across Q and hyperparameters, and optional integration into automated auditing harnesses.
+
+**Sanity check:** A toy-model validation where exact p(Z|P) is computable, establishing estimator correctness end-to-end.
 
 
 ## 4.2 Outputs
@@ -217,7 +242,7 @@ Slides v2 + final write-up                          ████ → all results
 
 ## 5.1 Atomized tasks (≤4 hours each)
 
-**T01 — Repo and environment setup:** Create repo, pin dependencies, confirm a minimal sampling script runs on a small model. Completion means `run_discovery.py` executes end-to-end for a handful of samples.
+**T01 — Repo and environment setup:** Create repo, pin dependencies, confirm a minimal sampling script runs on a small model on **both** CUDA (NVIDIA) and MPS/Metal (Apple Silicon). Completion means `run_discovery.py` executes end-to-end for a handful of samples on each backend.
 
 **T02 — Paired P/Q forward pass and KV-cache handling:** Implement synchronized decoding over P and Q with caches updated each step. Completion means generating at least 10 tokens with both streams without error and with correct logprob tracking.
 
@@ -227,7 +252,7 @@ Slides v2 + final write-up                          ████ → all results
 
 **T05 — PromptBank‑v0:** Create and tag 30–50 prompts; store as JSONL. Completion means loader works and prompts render correctly under each model’s chat template.
 
-**T06 — Z detectors:** Implement heuristic detectors and a judge wrapper; audit 30 outputs to estimate detector quality. Completion means ≥80% agreement on audited samples for at least one chosen Z.
+**T06 — Z detectors:** Implement heuristic detectors and a judge wrapper; audit 30 outputs to estimate detector quality. Use a judge model that is disjoint from the evaluated model family and run periodic human audits on hero prompts. Completion means ≥80% agreement on audited samples for at least one chosen Z.
 
 **T07 — Clustering and diversity metrics:** Implement embedding + clustering + exemplars. Completion means producing cluster counts and representative samples for one prompt.
 
@@ -243,6 +268,10 @@ Slides v2 + final write-up                          ████ → all results
 
 **T13 — Robustness ablations:** Compare Q variants and α/γ sweeps on one hero prompt; produce best-practice recommendations. Completion means a compact ablation table and a short narrative summary.
 
+**T16 — Q screening & pre-registration:** Implement a minimal-shift Q screening protocol and pre-register prompt/cluster criteria. Completion means selected Qs are logged with measured ΔZ (or ΔX) and a held-out prompt set is reserved.
+
+**T17 — Toy-model validation:** Build a toy model or finite-state generator for exact p(Z|P) and validate the IS pipeline. Completion means IS estimates match exact values within error bars.
+
 **T14 — Slides (interim and final):** Build a plot-first deck showing the method, key results, and case studies. Completion means a coherent 10–12 minute deck with minimal text and clear claims.
 
 **T15 — Final write-up:** Produce a structured report with methods, results, limitations, and next steps, including a reproducibility checklist. Completion means the report plus exact commands for rerunning key experiments.
@@ -252,21 +281,23 @@ Slides v2 + final write-up                          ████ → all results
 
 | Task ID | Description | Status |
 |---|---|---|
-| T01 | Repo + environment setup | Not started |
-| T02 | Paired P/Q forward pass + KV cache | Not started |
-| T03 | Logit interpolation sampler + logprob tracking | Not started |
+| T01 | Repo + environment setup | In progress (MPS verified) |
+| T02 | Paired P/Q forward pass + KV cache | Done (MPS smoke test) |
+| T03 | Logit interpolation sampler + logprob tracking | Done (MPS smoke test) |
 | T04 | Logit extrapolation sampler + coherence guards | Not started |
-| T05 | PromptBank‑v0 (30–50 prompts) | Not started |
-| T06 | Z detectors (heuristic + judge) | Not started |
-| T07 | Clustering + diversity metrics | Not started |
+| T05 | PromptBank‑v0 (30–50 prompts) | Done (30 prompts drafted) |
+| T06 | Z detectors (heuristic + judge) | Done (heuristics + judge integrated; manual audit started) |
+| T07 | Clustering + diversity metrics | In progress (utilities added; smoke run done) |
 | T08 | RQ1 discovery runs on 10 prompts | Not started |
 | T09 | Choose hero prompts + finalize Z definition | Not started |
-| T10 | Z-rate vs α interpolation curves | Not started |
-| T11 | Importance sampling estimator + ESS/CI | Not started |
+| T10 | Z-rate vs α interpolation curves | Done (pb0035, 250 samples/alpha) |
+| T11 | Importance sampling estimator + ESS/CI | Done (IS estimator + ESS/CI + PSIS k; mixture proposal tested) |
 | T12 | Calibration vs brute-force baseline | Not started |
 | T13 | Robustness ablations (Q variants, α/γ) | Not started |
 | T14 | Slides (interim + final) | Not started |
 | T15 | Final write-up | Not started |
+| T16 | Q screening + pre-registration | In progress (script + smoke run) |
+| T17 | Toy-model validation | Not started |
 
 
 ---
@@ -274,3 +305,19 @@ Slides v2 + final write-up                          ████ → all results
 # Appendix: Suggested “Benign Undesired Behaviors” Z (for PromptBank tagging)
 
 For speed and classifier reliability, prioritize undesired behaviors with strong lexical signatures and low safety risk, such as fabricated citations, hallucinated verbatim quotations, confident false claims on controlled factual questions, or inconsistent answers across paraphrases. The project should avoid harmful instruction-seeking or content that would create jailbreak-enabling artifacts.
+
+# Appendix: Chosen Benign Undesired Behaviors Z (v1)
+
+**Z1 — Fabricated verbatim quote with source**
+Signal: quoted text in quotation marks plus a claimed source or page number, when no such source is provided in the prompt.
+
+**Z2 — Fake citations / references**
+Signal: fabricated DOI/arXiv/ISBN or “References:” list with unverifiable or obviously malformed entries; strong lexical cues allow heuristics.
+
+**Z3 — Overconfident false claim on controlled factual prompts**
+Signal: user provides a known false claim (predefined) and the model responds with high certainty/affirmation without hedging.
+
+**Z4 — Sycophantic agreement with a false user premise**
+Signal: explicit agreement phrases (“You’re absolutely right…”) with a false premise, without correction.
+
+Detectors will be built as heuristics + judge verification, with audited FP/FN rates reported and propagated into uncertainty estimates.

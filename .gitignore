@@ -1,0 +1,29 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Local data/artifacts
+/data/*
+!/data/promptbank_v0.jsonl
+/runs/
+/outputs/
+
+# Torch/HF caches (optional local)
+.hf_cache/
+.huggingface/
+
+# OS/editor
+*.swp
+*.swo
+.vscode/
+.idea/

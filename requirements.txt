@@ -1,0 +1,17 @@
+# Install PyTorch separately to match your backend:
+# - NVIDIA CUDA: https://pytorch.org/get-started/locally/
+# - Apple Silicon (MPS): https://pytorch.org/get-started/locally/
+# Use uv to create the environment: `uv venv --python 3.13`
+
+transformers>=4.46.0
+accelerate>=0.33.0
+numpy>=1.26.0
+pandas>=2.2.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
+matplotlib>=3.8.0
+scikit-learn>=1.4.0
+sentence-transformers>=2.7.0
+safetensors>=0.4.3
+tokenizers>=0.19.1
+requests>=2.32.0
